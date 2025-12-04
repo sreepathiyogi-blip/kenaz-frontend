@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Kenaz Ad Studio – Live Ads Preview</title>
+<title>Kenaz Ad Studio – Live Ads Preview (Prefilled)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -354,13 +354,22 @@ width: calc(100% / var(--app-scale));
 
 <script>
 /*
-  Full JS logic.
-  - Requires a valid FB Graph API token and ad account IDs to fully function.
-  - Serve via http(s). Instagram embeds require publicly accessible posts.
+  Modified JS: adds DEFAULT_TOKEN, DEFAULT_ACCOUNTS and AUTO_LOAD options.
+  Edit the values below to prefill the token & accounts so users DON'T need to manually paste them in the UI.
+  SECURITY NOTE: embedding long-lived tokens into client-side code is insecure for production. Use only for testing/local use.
 */
 
 (function(){
 'use strict';
+
+/* ---------- EDIT THESE DEFAULTS ---------- */
+// Put your token here (string). Leave empty '' if you don't want to auto-fill.
+const DEFAULT_TOKEN = 'EAAHeR1E5PKUBP19I9GXYVw8kWusULp7l7ZBbyHf1qZCzBdPZA7enpZAbLZBQGajtASZCJWbesZCthHzV0K8xd2KfDKYZBRZAGjbMDtOZCmlX3jlRpMQUlAp8OedkqBD12rr35FnL4InZCrqhfV3fPTVACozb5YWZC7KmXZBgRabEbE1rwuKnZBJwsHYn0oOPtyZBm504dFJgE1ZA3KTw'; /* e.g. 'EAABsbCS1i...' */
+// Put accounts here as comma separated act_ ids, or leave empty '' if you don't want to auto-fill.
+const DEFAULT_ACCOUNTS = 'act_1820431671907314, act_24539675529051798'; /* e.g. 'act_123456789,act_987654321' */
+// If true, after the page loads it will automatically call Load Ads (if token & accounts present)
+const AUTO_LOAD = false;
+/* ---------------------------------------- */
 
 /* ---------- CONFIG & STATE ---------- */
 const API_BASE = "https://kenaz-backend.onrender.com"; // AI endpoint optional - keep as is or change
@@ -1527,6 +1536,36 @@ function init() {
 
 window.AppController = { load: loadAds, showModal: UI.showModal };
 init();
+
+// --- Prefill override logic: populates token & accounts and optionally auto-loads ---
+function safeSet(id, value) { try { const el = document.getElementById(id); if (el) el.value = value; } catch(e) {} }
+
+function runInitOverrides() {
+  try {
+    if (DEFAULT_TOKEN && DEFAULT_TOKEN.trim()) {
+      safeSet('token', DEFAULT_TOKEN.trim());
+      try { document.getElementById('rememberToken').checked = true; } catch(e) {}
+    }
+    if (DEFAULT_ACCOUNTS && DEFAULT_ACCOUNTS.trim()) {
+      const normalized = DEFAULT_ACCOUNTS.split(/[,\\n]/).map(s=>s.trim()).filter(Boolean).join('\\n');
+      safeSet('accountIds', normalized);
+      safeSet('accInput', normalized.split('\\n').join(', '));
+      try { localStorage.setItem(CONFIG.STORAGE_KEYS.ACCOUNTS, normalized); } catch(e) {}
+    }
+
+    if (AUTO_LOAD && DEFAULT_TOKEN && DEFAULT_ACCOUNTS) {
+      setTimeout(()=>{
+        try { document.getElementById('loadBtn').click(); } catch(e){ console.warn('Auto load failed', e); }
+      }, 700);
+    }
+  } catch(e) { console.warn('Prefill override failed', e); }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  // ensure event listeners & init ran
+  try { if (typeof init === 'function') init(); } catch(e) { console.warn('Original init() not present or failed', e); }
+  runInitOverrides();
+});
 
 })(); // end IIFE
 </script>
