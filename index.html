@@ -844,6 +844,7 @@ const UI = {
     if (fa) {
       try { fa.parentElement && fa.parentElement.removeChild(fa); } catch(e) { fa.style.display = 'none'; }
     }
+    document.body.style.overflow = '';
   },
 
   createCardHTML(ad) {
@@ -1418,6 +1419,11 @@ async function showModalEmbedded(adId) {
   }
 
   DOM.get('modal').classList.add('show');
+  window.scrollTo({ top: 0, behavior: 'instant' });
+document.body.style.overflow = 'hidden';
+const modalMain = document.querySelector('.modal-main');
+if (modalMain) modalMain.scrollTop = 0;
+  
 }
 
 /* ---------- Event binding ---------- */
@@ -1571,3 +1577,4 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+
