@@ -397,20 +397,21 @@ width: calc(100% / var(--app-scale));
 
 <script>
 // ========== AI ANALYSIS FUNCTIONS ==========
+// ========== AI ANALYSIS FUNCTIONS ==========
+const APIBASE = API_BASE; // Use the correct variable name
 
 // Helper to show loading state
 function setAILoading(btnId, loading, text = '') {
-  const btn = DOM.get(btnId);
-  const box = DOM.get('aiInsightBox');
+  const btn = document.getElementById(btnId); // Use document.getElementById instead of DOM.get
+  const box = document.getElementById('aiInsightBox');
+  
   if (!btn || !box) return;
+  
   if (loading) {
     btn.disabled = true;
     btn.textContent = '🔄 Analyzing...';
     box.style.display = 'block';
-    box.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">' +
-                    '<div class="loading-spinner"></div>' +
-                    '<p style="margin-top:10px;">AI is analyzing your data...</p>' +
-                    '</div>';
+    box.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)"><div class="loading-spinner"></div><p style="margin-top:10px">AI is analyzing your data...</p></div>';
   } else {
     btn.disabled = false;
     if (text) btn.textContent = text;
@@ -419,54 +420,73 @@ function setAILoading(btnId, loading, text = '') {
 
 // Helper to display AI response
 function displayAIResponse(content, error = false) {
-  const box = DOM.get('aiInsightBox');
+  const box = document.getElementById('aiInsightBox');
   if (!box) return;
+  
   box.style.display = 'block';
+  
   if (error) {
-    box.innerHTML = `<p style="color:#ff4d4d;">${content}</p>`;
+    box.innerHTML = `<p style="color:#ff4d4d; padding:14px; background:rgba(255,77,77,0.1); border-radius:10px; border:1px solid #ff4d4d">❌ ${content}</p>`;
   } else {
     let formatted = content
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\n\n/g, '</p><p>')
       .replace(/\n/g, '<br>')
       .replace(/^(\d+\.)/gm, '<br><strong>$1</strong>');
-    box.innerHTML = `<p style="white-space:pre-wrap;">${formatted}</p>`;
+    
+    box.innerHTML = `<div style="white-space:pre-wrap"><p>${formatted}</p></div>`;
   }
-  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  
+  setTimeout(() => {
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
 }
 
 // 1. Individual Ad Analysis
-DOM.get('aiInsightBtn').onclick = async () => {
-  if (!State.currentAd) return;
+document.getElementById('aiInsightBtn').onclick = async () => {
+  if (!window.AppState || !window.AppState.currentAd) {
+    displayAIResponse('Please select an ad first', true);
+    return;
+  }
+  
   setAILoading('aiInsightBtn', true);
+  
   try {
-    const response = await fetch(`${APIBASE}/api/ai-insights`, {
+    const ad = window.AppState.currentAd;
+    const response = await fetch('https://kenaz-backend.onrender.com/api/ai-insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: JSON.stringify({ 
         adData: {
-          name: State.currentAd.name,
-          spend: State.currentAd.spend,
-          revenue: State.currentAd.revenue,
-          roas: State.currentAd.roas,
-          purchases: State.currentAd.purchases,
-          impressions: State.currentAd.impressions,
-          clicks: State.currentAd.clicks,
-          ctr: State.currentAd.ctr,
-          cpc: State.currentAd.cpc
+          name: ad.name,
+          spend: ad.spend || 0,
+          revenue: ad.rev || 0,
+          roas: ad.roas || 0,
+          purchases: ad.purchases || 0,
+          impressions: ad.imp || 0,
+          clicks: ad.clicks || 0,
+          ctr: ad.ctr || 0,
+          cpc: ad.cpc || 0
         }
       })
     });
+    
     const data = await response.json();
-    if (data.insights) displayAIResponse(data.insights);
-    else displayAIResponse('Failed to generate insights', true);
-  } catch (e) {
-    console.error('AI Error:', e);
-    displayAIResponse('Error connecting to AI service', true);
+    
+    if (data.insights) {
+      displayAIResponse(data.insights);
+    } else {
+      displayAIResponse('Failed to generate insights', true);
+    }
+  } catch (error) {
+    console.error('AI Error:', error);
+    displayAIResponse('Error connecting to AI service: ' + error.message, true);
   } finally {
     setAILoading('aiInsightBtn', false, '📊 Analyze This Ad');
   }
 };
+
+// Similar fixes for other buttons...
 
 // 2–7: keep your existing handlers here unchanged...
 // (gender, product, creative, budget, audience, report)
@@ -530,6 +550,8 @@ const State = {
   currentAd: null,
   manualMap: {},
 };
+// Expose State globally for AI handlers
+window.AppState = State;
 
 /* ---------- DOM helper ---------- */
 const DOM = {
@@ -2043,3 +2065,4 @@ DOM.get('aiReportBtn').onclick = async () => {
 </script>
 </body>
 </html>
+
