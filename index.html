@@ -376,87 +376,74 @@ width: calc(100% / var(--app-scale));
   <div id="metricsGrid"></div>
   
   <!-- AI Analysis Buttons -->
-  <div style="margin-top:20px; border-top:1px solid #1a1a1a; padding-top:16px">
-    <h5 style="color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:12px;font-weight:800">🤖 AI Analysis</h5>
-    
-    <button id="aiInsightBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px">
-      📊 Analyze This Ad
-    </button>
-    
-    <button id="aiGenderBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px">
-      👥 Gender Analysis (All Ads)
-    </button>
-    
-    <button id="aiProductBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px">
-      🎯 Product Performance
-    </button>
-    
-    <button id="aiCreativeBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px">
-      🎨 Creative Insights
-    </button>
-    
-    <button id="aiBudgetBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px">
-      💰 Budget Optimization
-    </button>
-    
-    <button id="aiAudienceBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px">
-      🎪 Audience Targeting
-    </button>
-    
-    <button id="aiReportBtn" class="btn btn-dark" style="width:100%">
-      📈 Campaign Report
-    </button>
-    // ========== AI ANALYSIS FUNCTIONS ==========
+   <div style="margin-top:20px; border-top:1px solid #1a1a1a; padding-top:16px;">
+  <h5 style="color:var(--muted); font-size:.7rem; text-transform:uppercase; letter-spacing:1.2px; margin-bottom:12px; font-weight:800;">
+    🤖 AI Analysis
+  </h5>
+  <button id="aiInsightBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px;">📊 Analyze This Ad</button>
+  <button id="aiGenderBtn"  class="btn btn-dark" style="width:100%; margin-bottom:8px;">👥 Gender Analysis (All Ads)</button>
+  <button id="aiProductBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px;">🎯 Product Performance</button>
+  <button id="aiCreativeBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px;">🎨 Creative Insights</button>
+  <button id="aiBudgetBtn"  class="btn btn-dark" style="width:100%; margin-bottom:8px;">💰 Budget Optimization</button>
+  <button id="aiAudienceBtn" class="btn btn-dark" style="width:100%; margin-bottom:8px;">🎪 Audience Targeting</button>
+  <button id="aiReportBtn"  class="btn btn-dark" style="width:100%;">📈 Campaign Report</button>
+</div>
+
+<div id="aiInsightBox"
+     style="margin-top:16px; font-size:0.85rem; color:var(--text); line-height:1.6;
+            background:#0d0d0d; padding:14px; border-radius:10px;
+            border:1px solid #1a1a1a; display:none; max-height:500px; overflow-y:auto;">
+</div>
+
+<script>
+// ========== AI ANALYSIS FUNCTIONS ==========
 
 // Helper to show loading state
 function setAILoading(btnId, loading, text = '') {
   const btn = DOM.get(btnId);
   const box = DOM.get('aiInsightBox');
-  
+  if (!btn || !box) return;
   if (loading) {
     btn.disabled = true;
     btn.textContent = '🔄 Analyzing...';
     box.style.display = 'block';
-    box.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)"><div class="loading-spinner"></div><p style="margin-top:10px">AI is analyzing your data...</p></div>';
+    box.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">' +
+                    '<div class="loading-spinner"></div>' +
+                    '<p style="margin-top:10px;">AI is analyzing your data...</p>' +
+                    '</div>';
   } else {
     btn.disabled = false;
-    btn.textContent = text || btn.textContent;
+    if (text) btn.textContent = text;
   }
 }
 
 // Helper to display AI response
 function displayAIResponse(content, error = false) {
   const box = DOM.get('aiInsightBox');
+  if (!box) return;
   box.style.display = 'block';
-  
   if (error) {
-    box.innerHTML = `<p style="color:#ff4d4d;">❌ ${content}</p>`;
+    box.innerHTML = `<p style="color:#ff4d4d;">${content}</p>`;
   } else {
-    // Convert markdown-style formatting to HTML
     let formatted = content
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\n\n/g, '</p><p>')
       .replace(/\n/g, '<br>')
       .replace(/^(\d+\.)/gm, '<br><strong>$1</strong>');
-    
-    box.innerHTML = `<div style="white-space:pre-wrap">${formatted}</div>`;
+    box.innerHTML = `<p style="white-space:pre-wrap;">${formatted}</p>`;
   }
-  
-  // Scroll to results
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// 1. Individual Ad Analysis (existing - update it)
+// 1. Individual Ad Analysis
 DOM.get('aiInsightBtn').onclick = async () => {
   if (!State.currentAd) return;
-  
   setAILoading('aiInsightBtn', true);
-  
   try {
     const response = await fetch(`${APIBASE}/api/ai-insights`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         adData: {
           name: State.currentAd.name,
           spend: State.currentAd.spend,
@@ -470,240 +457,21 @@ DOM.get('aiInsightBtn').onclick = async () => {
         }
       })
     });
-    
     const data = await response.json();
-    
-    if (data.insights) {
-      displayAIResponse(data.insights);
-    } else {
-      displayAIResponse('Failed to generate insights', true);
-    }
-  } catch (error) {
-    console.error('AI Error:', error);
+    if (data.insights) displayAIResponse(data.insights);
+    else displayAIResponse('Failed to generate insights', true);
+  } catch (e) {
+    console.error('AI Error:', e);
     displayAIResponse('Error connecting to AI service', true);
   } finally {
     setAILoading('aiInsightBtn', false, '📊 Analyze This Ad');
   }
 };
 
-// 2. Gender Analysis
-DOM.get('aiGenderBtn').onclick = async () => {
-  setAILoading('aiGenderBtn', true);
-  
-  try {
-    const adsData = State.filtered.slice(0, 50).map(ad => ({
-      name: ad.name,
-      spend: ad.spend,
-      revenue: ad.revenue,
-      roas: ad.roas,
-      purchases: ad.purchases
-    }));
-    
-    const response = await fetch(`${APIBASE}/api/gender-analysis`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ads: adsData })
-    });
-    
-    const data = await response.json();
-    
-    if (data.analysis) {
-      displayAIResponse(data.analysis);
-    } else {
-      displayAIResponse('Failed to generate gender analysis', true);
-    }
-  } catch (error) {
-    console.error('AI Error:', error);
-    displayAIResponse('Error connecting to AI service', true);
-  } finally {
-    setAILoading('aiGenderBtn', false, '👥 Gender Analysis (All Ads)');
-  }
-};
+// 2–7: keep your existing handlers here unchanged...
+// (gender, product, creative, budget, audience, report)
+</script>
 
-// 3. Product Analysis
-DOM.get('aiProductBtn').onclick = async () => {
-  setAILoading('aiProductBtn', true);
-  
-  try {
-    const adsData = State.filtered.map(ad => ({
-      name: ad.name,
-      product: ad.product,
-      spend: ad.spend,
-      revenue: ad.revenue,
-      roas: ad.roas,
-      purchases: ad.purchases
-    }));
-    
-    const response = await fetch(`${APIBASE}/api/product-analysis`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ads: adsData })
-    });
-    
-    const data = await response.json();
-    
-    if (data.analysis) {
-      displayAIResponse(data.analysis);
-    } else {
-      displayAIResponse('Failed to generate product analysis', true);
-    }
-  } catch (error) {
-    console.error('AI Error:', error);
-    displayAIResponse('Error connecting to AI service', true);
-  } finally {
-    setAILoading('aiProductBtn', false, '🎯 Product Performance');
-  }
-};
-
-// 4. Creative Analysis
-DOM.get('aiCreativeBtn').onclick = async () => {
-  setAILoading('aiCreativeBtn', true);
-  
-  try {
-    const topAds = State.filtered
-      .sort((a, b) => b.roas - a.roas)
-      .slice(0, 15)
-      .map(ad => ({
-        name: ad.name,
-        roas: ad.roas,
-        ctr: ad.ctr,
-        purchases: ad.purchases
-      }));
-    
-    const response = await fetch(`${APIBASE}/api/creative-analysis`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ads: topAds })
-    });
-    
-    const data = await response.json();
-    
-    if (data.analysis) {
-      displayAIResponse(data.analysis);
-    } else {
-      displayAIResponse('Failed to generate creative analysis', true);
-    }
-  } catch (error) {
-    console.error('AI Error:', error);
-    displayAIResponse('Error connecting to AI service', true);
-  } finally {
-    setAILoading('aiCreativeBtn', false, '🎨 Creative Insights');
-  }
-};
-
-// 5. Budget Optimization
-DOM.get('aiBudgetBtn').onclick = async () => {
-  setAILoading('aiBudgetBtn', true);
-  
-  try {
-    const totalBudget = State.filtered.reduce((sum, ad) => sum + parseFloat(ad.spend || 0), 0);
-    
-    const adsData = State.filtered
-      .sort((a, b) => b.spend - a.spend)
-      .slice(0, 20)
-      .map(ad => ({
-        name: ad.name,
-        spend: ad.spend,
-        roas: ad.roas,
-        purchases: ad.purchases,
-        ctr: ad.ctr
-      }));
-    
-    const response = await fetch(`${APIBASE}/api/budget-optimization`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        ads: adsData,
-        totalBudget: totalBudget
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.analysis) {
-      displayAIResponse(data.analysis);
-    } else {
-      displayAIResponse('Failed to generate budget optimization', true);
-    }
-  } catch (error) {
-    console.error('AI Error:', error);
-    displayAIResponse('Error connecting to AI service', true);
-  } finally {
-    setAILoading('aiBudgetBtn', false, '💰 Budget Optimization');
-  }
-};
-
-// 6. Audience Analysis
-DOM.get('aiAudienceBtn').onclick = async () => {
-  setAILoading('aiAudienceBtn', true);
-  
-  try {
-    const adsData = State.filtered.map(ad => ({
-      name: ad.name,
-      roas: ad.roas,
-      spend: ad.spend
-    }));
-    
-    const response = await fetch(`${APIBASE}/api/audience-analysis`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ads: adsData })
-    });
-    
-    const data = await response.json();
-    
-    if (data.analysis) {
-      displayAIResponse(data.analysis);
-    } else {
-      displayAIResponse('Failed to generate audience analysis', true);
-    }
-  } catch (error) {
-    console.error('AI Error:', error);
-    displayAIResponse('Error connecting to AI service', true);
-  } finally {
-    setAILoading('aiAudienceBtn', false, '🎪 Audience Targeting');
-  }
-};
-
-// 7. Campaign Report
-DOM.get('aiReportBtn').onclick = async () => {
-  setAILoading('aiReportBtn', true);
-  
-  try {
-    const adsData = State.filtered.map(ad => ({
-      name: ad.name,
-      spend: ad.spend,
-      revenue: ad.revenue,
-      roas: ad.roas,
-      purchases: ad.purchases
-    }));
-    
-    const response = await fetch(`${APIBASE}/api/campaign-report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        ads: adsData,
-        dateRange: {
-          since: DOM.get('since').value || 'N/A',
-          until: DOM.get('until').value || 'N/A'
-        }
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.report) {
-      displayAIResponse(data.report);
-    } else {
-      displayAIResponse('Failed to generate campaign report', true);
-    }
-  } catch (error) {
-    console.error('AI Error:', error);
-    displayAIResponse('Error connecting to AI service', true);
-  } finally {
-    setAILoading('aiReportBtn', false, '📈 Campaign Report');
-  }
-};
 <div id="aiInsightBox" style="margin-top:16px; font-size:0.85rem; color:var(--text); line-height:1.6; background:#0d0d0d; padding:14px; border-radius:10px; border:1px solid #1a1a1a; display:none; max-height:500px; overflow-y:auto"></div>
 </div>
 </div>
@@ -736,7 +504,7 @@ const AUTO_LOAD = false;
 /* ---------------------------------------- */
 
 /* ---------- CONFIG & STATE ---------- */
-const API_BASE = "https://kenaz-backend.onrender.com/"; // AI endpoint optional - keep as is or change
+const API_BASE = "https://kenaz-backend.onrender.com"; // AI endpoint optional - keep as is or change
 const CONFIG = {
   API_VERSION: 'v21.0',
   BATCH_SIZE: 25,
