@@ -303,8 +303,22 @@ overflow-x:hidden;   /* ← HIDE HORIZONTAL SCROLL */
       <option value="gemini">Google Gemini</option>
     </select>
     
-    <label for="aiApiKey">API Key</label>
-    <input type="password" id="aiApiKey" placeholder="Enter API Key..." autocomplete="off">
+    <div style="display:flex; align-items:center; gap:8px;">
+  <label for="aiApiKey" style="flex:0 0 auto;">API Key</label>
+  <button type="button" id="toggleApiKey" class="btn btn-dark" style="padding:4px 8px; font-size:0.7rem; margin-left:auto;" aria-label="Toggle API key visibility">👁️ Show</button>
+</div>
+<input type="password" id="aiApiKey" placeholder="Enter API Key..." autocomplete="off">
+
+<script>
+  document.getElementById('toggleApiKey')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('aiApiKey');
+    const btn = e.target;
+    const isPassword = input.type === 'password';
+    input.type = isPassword ? 'text' : 'password';
+    btn.textContent = isPassword ? '🔓 Hide' : '👁️ Show';
+  });
+</script>
     <small id="apiKeyHelper">Perplexity: pplx-xxx | OpenAI: sk-xxx | Anthropic: sk-ant-xxx</small>
     
     <label for="aiModel" style="margin-top:12px">Model</label>
@@ -1590,9 +1604,11 @@ function initEventListeners() {
   DOM.get('closeSidebar').onclick = UI.closeSidebar;
   DOM.get('overlay').onclick = () => { UI.closeSidebar(); UI.closeModal(); };
   DOM.get('loadBtn').onclick = loadAds;
+  
   DOM.get('searchBtn').onclick = () => { DOM.get('accountIds').value = DOM.get('accInput').value.split(',').map(s => s.trim()).filter(Boolean).join('\n'); loadAds(); };
   DOM.get('accInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') { DOM.get('accountIds').value = DOM.get('accInput').value.split(',').map(s => s.trim()).filter(Boolean).join('\n'); loadAds(); } });
   DOM.get('refreshBtn').onclick = () => { if (State.ads.length) loadAds(); };
+  
   DOM.getAll('.chip').forEach(chip => {
     chip.addEventListener('click', () => {
       DOM.getAll('.chip').forEach(c => c.classList.remove('active'));
