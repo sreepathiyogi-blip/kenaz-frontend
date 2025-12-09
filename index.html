@@ -428,7 +428,7 @@ const memoryStorage = window.localStorage;
 'use strict';
 
 /* ---------- EDIT THESE DEFAULTS ---------- */
-const DEFAULT_TOKEN = 'EAAHeR1E5PKUBP19I9GXYVw8kWusULp7l7ZBbyHf1qZCzBdPZA7enpZAbLZBQGajtASZCJWbesZCthHzV0K8xd2KfDKYZBRZAGjbMDtOZCmlX3jlRpMQUlAp8OedkqBD12rr35FnL4InZCrqhfV3fPTVACozb5YWZC7KmXZBgRabEbE1rwuKnZBJwsHYn0oOPtyZBm504dFJgE1ZA3KTw'; /* Put token here for local testing only. Do NOT embed long-lived tokens in production code. */
+const DEFAULT_TOKEN = ''; /* Put token here for local testing only. Do NOT embed long-lived tokens in production code. */
 const DEFAULT_ACCOUNTS = 'act_1820431671907314, act_24539675529051798';
 const AUTO_LOAD = false;
 
@@ -457,7 +457,9 @@ const CONFIG = {
     TOKEN: 'kenaz_tk',
     ACCOUNTS: 'kenaz_acc',
     PERMAPS: 'kenaz_permmap',
-    CREATIVE_CACHE: 'kenaz_creative_cache'
+    CREATIVE_CACHE: 'kenaz_creative_cache',
+    AI_CONFIG: 'kenaz_ai_config',
+    REMEMBER_TOKEN: 'kenaz_remember_tk'
   },
   AD_FIELDS: 'id,name,status,effective_status,creative{id,object_story_id,image_url,thumbnail_url,video_id,instagram_permalink_url,effective_instagram_story_id}',
   INSIGHT_FIELDS: 'spend,impressions,reach,ctr,cpc,cpm,inline_link_clicks,actions,action_values,video_thruplay_watched_actions,video_p100_watched_actions'
@@ -769,8 +771,10 @@ const API = {
       memoryStorage.setItem(cacheKey, JSON.stringify(creativeCache));
     };
 
-    await tryFillImages();
-    return results;
+    // DISABLED: Expensive image auto-discovery causes 400 errors and slow loading
+// await tryFillImages();
+return results;
+
   },
 
   async fetchVideoSource(videoId, token, signal){
@@ -1259,7 +1263,9 @@ async function loadAds() {
         }
 
         let resolved = '';
-        try { resolved = await resolveImageLinkForCreative(ad.creative || {}, token, accController.signal); } catch(e) { resolved = ''; }
+        try {// resolved = await resolveImageLinkForCreative(ad.creative || {}, token, accController.signal); 
+          resolved = null; 
+        } catch(e) { }
 
         if (!permalink && resolved && /facebook\.com|instagram\.com/i.test(resolved)) {
           permalink = resolved;
@@ -1631,7 +1637,7 @@ function initEventListeners() {
   
   // Load saved AI config
   const loadAiConfig = () => {
-    const saved = memoryStorage.getItem('ai_config');
+    const saved = memoryStorage.getItem(CONFIG.STORAGE_KEYS.AI_CONFIG);
     if (saved) {
       try {
         const config = JSON.parse(saved);
@@ -1645,7 +1651,21 @@ function initEventListeners() {
     }
   };
   
+  // Load AI config and update UI
   loadAiConfig();
+  
+  // Make sure the model select is updated after loading
+  if (aiProviderSelect && aiProviderSelect.onchange) {
+    aiProviderSelect.onchange();
+    // Reset to saved model after provider change
+    const saved = memoryStorage.getItem(CONFIG.STORAGE_KEYS.AI_CONFIG);
+    if (saved) {
+      try {
+        const config = JSON.parse(saved);
+        if (aiModelSelect) aiModelSelect.value = config.model || 'sonar';
+      } catch(e) {}
+    }
+  }
   
   // Update model options when provider changes
   if (aiProviderSelect) {
@@ -1668,9 +1688,10 @@ function initEventListeners() {
           {val: 'claude-3-haiku-20240307', text: 'Claude 3 Haiku'}
         ],
         gemini: [
-          {val: 'gemini-pro', text: 'Gemini Pro'},
-          {val: 'gemini-pro-vision', text: 'Gemini Pro Vision'}
-        ]
+    { val: 'gemini-2.0-flash', text: 'Gemini 2.0 Flash (Latest)' },
+    { val: 'gemini-1.5-pro', text: 'Gemini 1.5 Pro (Best)' },
+    { val: 'gemini-1.5-flash', text: 'Gemini 1.5 Flash (Fast)' }
+      ]
       };
       
       if (aiModelSelect && modelOptions[provider]) {
@@ -1683,7 +1704,7 @@ function initEventListeners() {
         perplexity: 'Get key at: https://www.perplexity.ai/settings/api',
         openai: 'Get key at: https://platform.openai.com/api-keys',
         anthropic: 'Get key at: https://console.anthropic.com/settings/keys',
-        gemini: 'Get key at: https://makersuite.google.com/app/apikey'
+        gemini: 'Get key at: https://aistudio.google.com/app/apikey (Format: AIza...)'
       };
       const helperEl = document.getElementById('apiKeyHelper');
       if (helperEl) helperEl.textContent = helpers[provider] || 'Enter your API key';
@@ -1706,9 +1727,9 @@ function initEventListeners() {
         return;
       }
       
-      memoryStorage.setItem('ai_config', JSON.stringify(config));
+      memoryStorage.setItem(CONFIG.STORAGE_KEYS.AI_CONFIG, JSON.stringify(config));
       Object.assign(AI_CONFIG, config);
-      alert('✅ AI Configuration saved!');
+      alert('✅ AI Configuration saved and will be remembered!');
     };
   }
   
@@ -1721,14 +1742,27 @@ function initEventListeners() {
       btn.textContent = '🔄 Testing...';
       
       try {
+        // First check if config is saved
+        const savedConfig = memoryStorage.getItem(CONFIG.STORAGE_KEYS.AI_CONFIG);
+        if (!savedConfig) {
+          alert('⚠️ Please save your configuration first!');
+          btn.disabled = false;
+          btn.textContent = origText;
+          return;
+        }
+        
+        const config = JSON.parse(savedConfig);
+        console.log('Testing with config:', {provider: config.provider, model: config.model, hasKey: !!config.apiKey});
+        
         const result = await callUniversalAI('Say "Hello, configuration test successful!" in 5 words.');
         if (result) {
-          alert('✅ AI Connection Successful!\n\n' + result);
+          alert('✅ AI Connection Successful!\n\nProvider: ' + config.provider + '\nModel: ' + config.model + '\n\nResponse:\n' + result);
         } else {
-          alert('❌ Test failed. Check your API key and try again.');
+          alert('❌ Test failed. No response received.\n\nCheck:\n1. API key is correct\n2. API is enabled\n3. Check browser console for errors');
         }
       } catch(e) {
-        alert('❌ Connection Error:\n' + e.message);
+        console.error('Test error:', e);
+        alert('❌ Connection Error:\n\n' + e.message + '\n\nCheck browser console for more details.');
       } finally {
         btn.disabled = false;
         btn.textContent = origText;
@@ -1837,7 +1871,7 @@ window.addEventListener('DOMContentLoaded', () => {
 /* ---------- UNIVERSAL AI INTEGRATION ---------- */
 async function callUniversalAI(prompt, context = {}) {
   // Load current config
-  const savedConfig = memoryStorage.getItem('ai_config');
+  const savedConfig = memoryStorage.getItem(CONFIG.STORAGE_KEYS.AI_CONFIG);
   let config = {...AI_CONFIG};
   if (savedConfig) {
     try {
@@ -1852,7 +1886,7 @@ async function callUniversalAI(prompt, context = {}) {
       return null;
     }
     config.apiKey = userKey.trim();
-    memoryStorage.setItem('ai_config', JSON.stringify(config));
+    memoryStorage.setItem(CONFIG.STORAGE_KEYS.AI_CONFIG, JSON.stringify(config));
   }
 
   const aiBox = document.getElementById('aiInsightBox');
@@ -1942,7 +1976,15 @@ async function callUniversalAI(prompt, context = {}) {
         break;
         
       case 'gemini':
-        response = await fetch(`${config.endpoints.gemini}/${config.model}:generateContent?key=${config.apiKey}`, {
+        // Gemini API uses specific model names
+        let geminiModel = config.model || 'gemini-1.5-flash';
+        // Map deprecated model names to current ones
+        if (geminiModel === 'gemini-pro') geminiModel = 'gemini-1.5-flash';
+        // Keep valid models as-is: gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash
+        const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${config.apiKey}`;
+
+        
+        response = await fetch(geminiEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1953,17 +1995,42 @@ async function callUniversalAI(prompt, context = {}) {
             }],
             generationConfig: {
               temperature: config.temperature,
-              maxOutputTokens: config.maxTokens
+              maxOutputTokens: config.maxTokens,
+              topP: 0.9,
+              topK: 40
             }
           })
         });
         
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`Gemini Error ${response.status}: ${errorText}`);
+          let errorMessage = `Gemini Error ${response.status}`;
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.error?.message || errorMessage;
+          } catch(e) {
+            errorMessage += `: ${errorText.substring(0, 200)}`;
+          }
+          throw new Error(errorMessage);
         }
+        
         data = await response.json();
-        result = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
+        
+        // Check for blocked content or other errors
+        if (data.promptFeedback?.blockReason) {
+          throw new Error(`Content blocked: ${data.promptFeedback.blockReason}`);
+        }
+        
+        result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        if (!result) {
+          // Check for finish reason
+          const finishReason = data.candidates?.[0]?.finishReason;
+          if (finishReason && finishReason !== 'STOP') {
+            throw new Error(`Generation stopped: ${finishReason}`);
+          }
+          throw new Error('No response generated');
+        }
         break;
         
       default:
@@ -1971,16 +2038,46 @@ async function callUniversalAI(prompt, context = {}) {
     }
 
     if (aiBox) {
-      aiBox.innerHTML = `
-        <div style="white-space:pre-wrap;line-height:1.6;color:var(--text)">
-          ${Utils.escape(result)}
-        </div>
-        <div style="margin-top:12px;padding-top:12px;border-top:1px solid #1a1a1a;font-size:0.75rem;color:var(--muted-2)">
-          Powered by ${config.provider.toUpperCase()} (${config.model}) • ${new Date().toLocaleTimeString()}
-        </div>
-      `;
-    }
+  // Start from raw text
+  let formatted = result || '';
 
+  // Add emoji headings if the LLM uses these section titles
+  formatted = formatted
+    .replace(/^(#+)\s*(key strengths?|strengths?)/gmi, '### ✅ Key Strengths')
+    .replace(/^(#+)\s*(areas? for improvement|improvements?)/gmi, '### ⚠️ Areas for Improvement')
+    .replace(/^(#+)\s*(optimization recommendations?|recommendations?)/gmi, '### 🚀 Optimization Recommendations')
+    .replace(/^(#+)\s*(a\/?b test|test idea)/gmi, '### 🧪 A/B Test Recommendation');
+
+  // Basic HTML formatting and highlighting
+  formatted = formatted
+    // turn markdown-style headings into styled <h3>
+    .replace(/^### (.*?)$/gm,
+      '<h3 style="color:#b88cff;font-size:1.05rem;margin:14px 0 8px;font-weight:700;">$1</h3>')
+    // bullets
+    .replace(/^[-•]\s+(.+)$/gm,
+      '<div style="margin:4px 0 4px 18px;">• $1</div>')
+    // percentages
+    .replace(/(\d+\.?\d*%)/g,
+      '<span style="color:#4caf50;font-weight:700;">$1</span>')
+    // rupee amounts
+    .replace(/₹([\d,]+(?:\.\d+)?)/g,
+      '<span style="color:#ff9800;font-weight:700;">₹$1</span>')
+    // ROAS-like “1.68x”
+    .replace(/(\d+\.?\d*x)/gi,
+      '<span style="color:#b88cff;font-weight:700;">$1</span>')
+    // paragraph spacing
+    .replace(/\n\n/g, '<br><br>');
+
+  aiBox.innerHTML = `
+    <div style="font-family:system-ui,-apple-system,sans-serif;line-height:1.8;color:#f6f6f6;">
+      ${formatted}
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid #1a1a1a;
+                font-size:0.75rem;color:var(--muted-2);text-align:center;">
+      ✨ Powered by ${config.provider.toUpperCase()} (${config.model}) • ${new Date().toLocaleTimeString()}
+    </div>
+  `;
+}
     return result;
 
   } catch (error) {
@@ -1989,7 +2086,7 @@ async function callUniversalAI(prompt, context = {}) {
       aiBox.innerHTML = `
         <div style="color:var(--danger);padding:12px;background:#1a0000;border-radius:8px">
           ❌ <strong>Error:</strong> ${Utils.escape(error.message)}<br><br>
-          <button onclick="memoryStorage.removeItem('ai_config');alert('Config cleared. Try again.');" 
+          <button onclick="memoryStorage.removeItem('kenaz_ai_config');alert('Config cleared. Try again.');" 
                   style="padding:6px 12px;background:var(--danger);border:0;border-radius:6px;color:#fff;cursor:pointer">
             Reset Configuration
           </button>
@@ -2204,4 +2301,3 @@ try { const s=document.createElement('style'); s.appendChild(document.createText
 </script>
 </body>
 </html>
-
