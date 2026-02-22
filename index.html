@@ -1476,7 +1476,7 @@ function filterByTab(filter) {
 /* ---------- export ---------- */
 function exportToExcel() {
   const data = State.filtered.map(a => ({
-    'ad ID': a.id, 'AD name': a.name, 'AD Link': a.bestLink || a.permalink || a.postUrl || (a.igShortcode ? `https://www.instagram.com/p/${a.igShortcode}/` : '') || `https://www.facebook.com/ads/library/?id=${a.id}`, 'STATUS': a.status, 'Video Type': a.platform || 'Facebook',
+    'ad ID': a.id, 'AD name': a.name, 'AD Link': a.bestLink || a.permalink || a.postUrl || (a.igShortcode ? `https://www.instagram.com/p/${a.igShortcode}/` : '') || '', 'STATUS': a.status, 'Video Type': a.platform || 'Facebook',
     'Spend': a.spend ? a.spend.toFixed(2) : '0.00', 'Revenue': a.rev ? a.rev.toFixed(2) : '0.00', 'ROAS': a.roas ? a.roas.toFixed(2) : '0.00',
     'CTR%': a.ctr ? a.ctr.toFixed(2) : '0.00', 'Imp': a.imp || 0, 'Link clicks': a.clicks || 0, 'CPM': a.cpm ? a.cpm.toFixed(2) : '0.00',
     'Cost per Purchase': a.cpp ? a.cpp.toFixed(2) : '0.00', 'CPC': a.cpc ? a.cpc.toFixed(2) : '0.00', 'Purchases': a.purchases || 0, 'Reach': a.reach || 0,
