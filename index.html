@@ -215,6 +215,23 @@ overflow-x:hidden;   /* ← HIDE HORIZONTAL SCROLL */
 .grid {
   padding-bottom:60px;
 }
+/* ── Creative Fatigue Indicator ── */
+.fatigue-badge{position:absolute;bottom:12px;left:12px;z-index:12;padding:5px 10px;border-radius:8px;font-size:.72rem;font-weight:800;backdrop-filter:blur(8px);pointer-events:none}
+.fatigue-fresh{background:rgba(76,175,80,0.85);color:#fff}
+.fatigue-warning{background:rgba(255,184,77,0.9);color:#111}
+.fatigue-danger{background:rgba(255,77,77,0.9);color:#fff}
+
+/* ── Funnel Visualization ── */
+.funnel-wrap{margin-top:16px;padding:16px;background:#0d0d0d;border-radius:12px;border:1px solid #1a1a1a}
+.funnel-title{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:12px}
+.funnel-step{margin-bottom:10px}
+.funnel-label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.funnel-label{font-size:.72rem;color:var(--muted);font-weight:700}
+.funnel-value{font-size:.72rem;color:var(--text);font-weight:800}
+.funnel-drop{font-size:.68rem;color:var(--danger);font-weight:700}
+.funnel-bar-bg{width:100%;height:8px;background:#1a1a1a;border-radius:999px;overflow:hidden}
+.funnel-bar-fill{height:100%;border-radius:999px;transition:width .6s ease}
+.funnel-connector{text-align:center;font-size:.68rem;color:var(--muted-2);margin:-4px 0 4px;letter-spacing:.5px}
 
 </style>
 </head>
@@ -462,7 +479,7 @@ const CONFIG = {
     REMEMBER_TOKEN: 'kenaz_remember_tk'
   },
   AD_FIELDS: 'id,name,status,effective_status,creative{id,object_story_id,image_url,thumbnail_url,video_id,instagram_permalink_url,effective_instagram_story_id}',
-  INSIGHT_FIELDS: 'spend,impressions,reach,ctr,cpc,cpm,inline_link_clicks,actions,action_values,video_thruplay_watched_actions,video_p100_watched_actions'
+  INSIGHT_FIELDS: 'spend,impressions,reach,ctr,cpc,cpm,frequency,inline_link_clicks,actions,action_values,video_thruplay_watched_actions,video_p100_watched_actions'
 };
 
 const State = {
@@ -868,6 +885,28 @@ function parseManualPermaps() {
   return map;
 }
 
+/* ---------- Creative Fatigue Helpers ---------- */
+function getFatigueLevel(ad) {
+  const freq = ad.frequency || 0;
+  const cpm  = ad.cpm || 0;
+  const ctr  = ad.ctr || 0;
+  let score  = 0;
+  // Frequency scoring
+  if (freq >= 5) score += 3;
+  else if (freq >= 3) score += 2;
+  else if (freq >= 2) score += 1;
+  // CPM scoring (high CPM = expensive = saturated)
+  if (cpm >= 300) score += 2;
+  else if (cpm >= 150) score += 1;
+  // CTR scoring (low CTR = people ignoring it)
+  if (ctr < 0.5) score += 2;
+  else if (ctr < 1.0) score += 1;
+
+  if (score >= 5) return { level: 'danger',  label: '🔴 Fatigued',  cls: 'fatigue-danger'  };
+  if (score >= 3) return { level: 'warning', label: '🟡 Watch',     cls: 'fatigue-warning' };
+  return           { level: 'fresh',   label: '🟢 Fresh',    cls: 'fatigue-fresh'   };
+}
+
 function extractIgShortcodeFromUrl(url) {
   if (!url) return null;
   try {
@@ -954,6 +993,8 @@ const UI = {
     const shareLink = chosen.url || '';
     const shareDisplay = shareLink ? Utils.escape(shareLink) : 'No link';
     const permalinkBadge = ad.permalink ? `<span class="meta-tag" title="Permalink available">✓ Link</span>` : '';
+    const fatigue = getFatigueLevel(ad);
+    const fatigueBadge = `<span class="fatigue-badge ${fatigue.cls}" title="Freq: ${(ad.frequency||0).toFixed(1)}x | CPM: ${Utils.formatCurrency(ad.cpm||0)} | CTR: ${Utils.formatPercent(ad.ctr||0)}">${fatigue.label}</span>`;
     const platformBadge = ad.platform === 'Instagram' ? `<span class="badge platform">📷 IG</span>` : '';
     const isReel = ad.isReel || ad.platform === 'Instagram' || Boolean(ad.igShortcode);
 
@@ -975,6 +1016,7 @@ const UI = {
               ${platformBadge}
               <span class="badge roas">ROAS ${roasText}x</span>
               <span class="badge spend">${Utils.formatCurrencyRounded(ad.spend || 0)}</span>
+              ${fatigueBadge}
             </div>
             <div class="link-badge"><a href="${Utils.escape(shareLink)}" target="_blank" rel="noopener noreferrer">🔗 Open</a></div>
           </div>
@@ -1033,6 +1075,7 @@ const UI = {
               ${platformBadge}
               <span class="badge roas">ROAS ${roasText}x</span>
               <span class="badge spend">${Utils.formatCurrencyRounded(ad.spend || 0)}</span>
+              ${fatigueBadge}
             </div>
           </div>
         `;
@@ -1378,6 +1421,7 @@ async function loadAds() {
           lpv2atc,
           atc2ci,
           ci2order,
+          frequency: +m.frequency || 0,
           isReel: (ad.permalink && ad.platform === 'Instagram') || (ad.creative && String(ad.name || '').toLowerCase().includes('reel'))
         });
       });
@@ -1398,6 +1442,7 @@ async function loadAds() {
     sortAndRender();
     DOM.get('toolbar').style.display = 'flex';
     DOM.get('exportBtn').disabled = !State.ads.length;
+    DOM.get('exportBtn').onclick = exportToExcel;
 
   } catch (error) {
     console.error('❌ Load error:', error);
@@ -1488,6 +1533,7 @@ async function showModalEmbedded(adId) {
   <div class="metric-card"><div class="metric-label">Spend</div><div class="metric-value">${Utils.formatCurrency(ad.spend || 0)}</div></div>
   <div class="metric-card"><div class="metric-label">Revenue</div><div class="metric-value">${Utils.formatCurrency(ad.rev || 0)}</div></div>
   </div>
+  ${renderFunnel(ad)}
   <div class="metric-row">
   <div class="metric-card ${roasClass}"><div class="metric-label">ROAS</div><div class="metric-value">${(ad.roas || 0).toFixed(2)}x</div></div>
   <div class="metric-card"><div class="metric-label">Purchases</div><div class="metric-value">${Utils.formatNumberLocale(ad.purchases || 0)}</div></div>
@@ -1495,6 +1541,10 @@ async function showModalEmbedded(adId) {
   <div class="metric-row">
   <div class="metric-card"><div class="metric-label">Impressions</div><div class="metric-value">${Utils.formatNumberLocale(ad.imp)}</div></div>
   <div class="metric-card"><div class="metric-label">Clicks</div><div class="metric-value">${Utils.formatNumberLocale(ad.clicks || 0)}</div></div>
+  </div>
+  <div class="metric-row">
+  <div class="metric-card ${getFatigueLevel(ad).level === 'danger' ? 'warning' : ''}"><div class="metric-label">Frequency</div><div class="metric-value">${(ad.frequency||0).toFixed(2)}x</div></div>
+  <div class="metric-card"><div class="metric-label">Fatigue</div><div class="metric-value" style="font-size:.95rem">${getFatigueLevel(ad).label}</div></div>
   </div>
   `;
 
@@ -2096,6 +2146,60 @@ async function callUniversalAI(prompt, context = {}) {
     return null;
   }
 }
+/* ---------- Funnel Visualization ---------- */
+function renderFunnel(ad) {
+  const steps = [
+    { label: 'Impressions', value: ad.imp || 0,      color: '#b88cff' },
+    { label: 'Link Clicks', value: ad.clicks || 0,   color: '#5eb3ff' },
+    { label: 'Add to Cart', value: ad.atc || 0,      color: '#4caf50' },
+    { label: 'Checkout',    value: ad.ci || 0,        color: '#ffb84d' },
+    { label: 'Purchases',   value: ad.purchases || 0, color: '#ff7043' }
+  ];
+
+  const max = steps[0].value || 1;
+
+  let html = `<div class="funnel-wrap"><div class="funnel-title">📉 Conversion Funnel</div>`;
+
+  steps.forEach((step, i) => {
+    const pct = Math.round((step.value / max) * 100);
+    const prev = i > 0 ? steps[i - 1].value : null;
+    const dropPct = (prev && prev > 0) ? Math.round((1 - step.value / prev) * 100) : null;
+    const numFormatted = step.value >= 1000
+      ? (step.value / 1000).toFixed(1) + 'K'
+      : step.value.toLocaleString('en-IN');
+
+    html += `
+      <div class="funnel-step">
+        <div class="funnel-label-row">
+          <span class="funnel-label">${step.label}</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${dropPct !== null ? `<span class="funnel-drop">▼ ${dropPct}% drop</span>` : ''}
+            <span class="funnel-value">${numFormatted}</span>
+          </div>
+        </div>
+        <div class="funnel-bar-bg">
+          <div class="funnel-bar-fill" style="width:${pct}%;background:${step.color}"></div>
+        </div>
+      </div>
+      ${i < steps.length - 1 ? `<div class="funnel-connector">↓</div>` : ''}
+    `;
+  });
+
+  // Overall conversion rate
+  const overallCvr = (ad.imp && ad.purchases)
+    ? ((ad.purchases / ad.imp) * 100).toFixed(3)
+    : '0.000';
+
+  html += `
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid #1a1a1a;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase">Overall CVR</span>
+      <span style="font-size:.9rem;font-weight:900;color:var(--accent)">${overallCvr}%</span>
+    </div>
+  </div>`;
+
+  return html;
+}
+
 /* ---------- AI ANALYSIS HANDLERS ---------- */
 function initAIHandlers() {
   const ad = State.currentAd;
@@ -2301,5 +2405,3 @@ try { const s=document.createElement('style'); s.appendChild(document.createText
 </script>
 </body>
 </html>
-
-
