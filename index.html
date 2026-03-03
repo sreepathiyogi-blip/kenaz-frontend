@@ -786,8 +786,6 @@ const UI = {
     const shareLink = chosen.url || '';
     const shareDisplay = shareLink ? Utils.escape(shareLink) : 'No link';
     const permalinkBadge = ad.permalink ? `<span class="meta-tag" title="Permalink available">✓ Link</span>` : '';
-    const fatigue = getFatigueLevel(ad);
-    const fatigueBadge = `<span class="fatigue-badge ${fatigue.cls}" title="Freq: ${(ad.frequency||0).toFixed(1)}x | CPM: ${Utils.formatCurrency(ad.cpm||0)} | CTR: ${Utils.formatPercent(ad.ctr||0)}">${fatigue.label}</span>`;
     const platformBadge = ad.platform === 'Instagram' ? `<span class="badge platform">📷 IG</span>` : '';
     const isReel = ad.isReel || ad.platform === 'Instagram' || Boolean(ad.igShortcode);
 
