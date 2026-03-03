@@ -469,7 +469,7 @@ const CONFIG = {
   API_VERSION: 'v21.0',
   BATCH_SIZE: 10,
   INSIGHTS_BATCH_SIZE: 20,
-  CREATIVE_CACHE_TTL_MS: 1000 * 60 * 60 * 24,
+  // CREATIVE_CACHE_TTL_MS removed — no longer caching creative data
   STORAGE_KEYS: {
     TOKEN: 'kenaz_tk',
     ACCOUNTS: 'kenaz_acc',
@@ -517,17 +517,8 @@ const Utils = {
   constructPermalink: (storyId) => { if (!storyId || typeof storyId !== 'string' || !storyId.includes('_')) return ''; const parts = storyId.split('_'); return parts.length >= 2 ? `https://www.facebook.com/${parts[0]}/posts/${parts[1]}` : ''; },
   getProduct: (name) => { if (!name) return 'Other'; const parts = name.split('|').map(s => s.trim()).filter(Boolean); for (const p of parts) { if (/^(kz acc|sale|tof|ot|dt|advantage|reel|video|\d+-\d+|m\+f|m|f)$/i.test(p)) continue; if (p.length > 3) return p.split(' ').slice(0, 3).join(' '); } return 'Other'; },
   getBestImage: (creative) => { if (!creative) return ''; const imgUrl = creative.image_url || creative.thumbnail_url || creative.full_picture || ''; if (imgUrl && imgUrl.includes('scontent')) return imgUrl.replace(/\/[ps]\d+x\d+\//g, '/'); return imgUrl; },
-  parseFbPostParts: (permalink) => {
-    try {
-      const u = new URL(permalink);
-      const path = u.pathname.replace(/^\//, '').split('/').filter(Boolean);
-      if (path.length >= 3 && (path[1] === 'posts' || path[1] === 'videos')) return { page: path[0], id: path[2] };
-      if (u.searchParams.has('story_fbid')) return { page: u.searchParams.get('id') || null, id: u.searchParams.get('story_fbid') };
-      const last = path[path.length - 1];
-      if (/^\d+$/.test(last)) return { page: path[0] || null, id: last };
-    } catch(e){}
-    return null;
-  }
+  // parseFbPostParts — REMOVED (no longer needed with simplified permalink logic)
+  parseFbPostParts: () => null
 };
 
 /* ---------- API helpers ---------- */
@@ -600,198 +591,52 @@ const API = {
   },
 
   async fetchPermalinksBatch(ads, token, signal) {
+    // ── Python-style 3-step permalink resolution ──
+    // Priority: 1) instagram_permalink_url  2) object_story_id → FB URL  3) empty
     const results = {};
-    const creativeIds = ads.filter(ad => ad.creative?.id).map(ad => ad.creative.id);
-    if (creativeIds.length === 0) return results;
+    const adIds = ads.filter(ad => ad.id).map(ad => ad.id);
+    if (adIds.length === 0) return results;
 
-    // batch fetch creative fields
-    for (let i = 0; i < creativeIds.length; i += CONFIG.BATCH_SIZE) {
-      const batch = creativeIds.slice(i, i + CONFIG.BATCH_SIZE);
-      const batchRequests = batch.map(creativeId => ({
-        method: 'GET',
-        relative_url: `${creativeId}?fields=instagram_permalink_url,effective_instagram_story_id,object_story_id,permalink_url,full_picture,attachments{media,subattachments,media_type,target},thumbnail_url,image_url,video_id`
-      }));
+    const BATCH = 50;
+    for (let i = 0; i < adIds.length; i += BATCH) {
+      const batch = adIds.slice(i, i + BATCH);
+      const idFilter = JSON.stringify([{ field: 'id', operator: 'IN', value: batch }]);
       try {
-        const response = await fetch(`https://graph.facebook.com/${CONFIG.API_VERSION}/?access_token=${token}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batch: batchRequests }),
-          signal
-        });
-        const batchResults = await response.json();
-        if (Array.isArray(batchResults)) {
-          batchResults.forEach((result, idx) => {
-            const creativeId = batch[idx];
-            if (result.code === 200 && result.body) {
-              try {
-                const data = JSON.parse(result.body);
-                results[creativeId] = {
-                  instagram_url: data.instagram_permalink_url || '',
-                  ig_story_id: data.effective_instagram_story_id || '',
-                  fb_story_id: data.object_story_id || '',
-                  permalink_url: data.permalink_url || '',
-                  image_url: data.image_url || '',
-                  full_picture: data.full_picture || '',
-                  thumbnail_url: data.thumbnail_url || '',
-                  video_id: data.video_id || ''
-                };
-              } catch (e) { console.warn(`Failed to parse creative ${creativeId}:`, e); }
+        const url = `https://graph.facebook.com/${CONFIG.API_VERSION}/${ads[0].account}/ads?access_token=${encodeURIComponent(token)}&fields=${encodeURIComponent('id,creative{object_story_id,effective_object_story_id,instagram_permalink_url,image_url,thumbnail_url}')}&filtering=${encodeURIComponent(idFilter)}&limit=50`;
+        const response = await fetch(url, { signal });
+        const json = await response.json();
+        if (json.data) {
+          json.data.forEach(ad => {
+            const adId = ad.id || '';
+            const creative = ad.creative || {};
+            const igPermalink = creative.instagram_permalink_url || '';
+            const objectStoryId = creative.object_story_id || creative.effective_object_story_id || '';
+            const imageUrl = creative.image_url || creative.thumbnail_url || '';
+
+            // Step 1: Instagram permalink
+            if (igPermalink) {
+              results[adId] = { permalink: igPermalink, platform: 'Instagram', image_url: imageUrl };
+            }
+            // Step 2: object_story_id → construct FB URL
+            else if (objectStoryId && objectStoryId.includes('_')) {
+              const [pageId, postId] = objectStoryId.split('_', 2);
+              results[adId] = { permalink: `https://www.facebook.com/${pageId}/posts/${postId}`, platform: 'Facebook', image_url: imageUrl };
+            }
+            // Step 3: No link available
+            else {
+              results[adId] = { permalink: '', platform: 'Facebook', image_url: imageUrl };
             }
           });
         }
+        console.log(`   Permalink batch ${Math.floor(i/BATCH)+1}: fetched ${json.data?.length || 0} ads`);
       } catch (e) {
-        console.error('Batch creative fetch failed:', e);
+        console.warn(`   Permalink batch ${Math.floor(i/BATCH)+1} failed:`, e);
       }
     }
 
-    // process story ids for permalink_url where possible
-    const fbStoryIds = ads.map(ad => ad.creative?.object_story_id).filter(id => id?.includes('_'));
-    for (let i = 0; i < fbStoryIds.length; i += CONFIG.BATCH_SIZE) {
-      const batch = fbStoryIds.slice(i, i + CONFIG.BATCH_SIZE);
-      const batchRequests = batch.map(storyId => ({ method: 'GET', relative_url: `${storyId}?fields=permalink_url` }));
-      try {
-        const response = await fetch(`https://graph.facebook.com/${CONFIG.API_VERSION}/?access_token=${token}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batch: batchRequests }),
-          signal
-        });
-        const batchResults = await response.json();
-        if (Array.isArray(batchResults)) {
-          batchResults.forEach((result, idx) => {
-            const storyId = batch[idx];
-            if (result.code === 200 && result.body) {
-              try {
-                const data = JSON.parse(result.body);
-                if (data.permalink_url) results[storyId] = data.permalink_url;
-              } catch (e) {
-                results[storyId] = Utils.constructPermalink(storyId);
-              }
-            } else {
-              results[storyId] = Utils.constructPermalink(storyId);
-            }
-          });
-        }
-      } catch (e) {
-        console.error('Batch FB permalink fetch failed:', e);
-      }
-    }
-
-    // try fill images & cache via oembed or direct html fetch if possible
-    const tryFillImages = async () => {
-      const cacheKey = CONFIG.STORAGE_KEYS.CREATIVE_CACHE;
-      let creativeCache = {};
-      try { creativeCache = JSON.parse(memoryStorage.getItem(cacheKey) || '{}'); } catch(e){ creativeCache = {}; }
-
-      const creativeToCheck = [];
-      ads.forEach(ad => {
-        const creativeId = ad.creative?.id;
-        const creativeData = creativeId ? (results[creativeId] || {}) : {};
-        const storyId = ad.creative?.object_story_id;
-        const permalinkFromBatch = creativeData.instagram_url || creativeData.permalink_url || results[storyId] || '';
-        if ((!creativeData.image_url && !creativeData.thumbnail_url && !creativeData.full_picture) && (permalinkFromBatch || storyId)) {
-          creativeToCheck.push({ ad, creativeId, storyId, permalinkFromBatch });
-        }
-      });
-
-      const concurrency = 6;
-      let idx = 0;
-      async function worker() {
-        while (idx < creativeToCheck.length) {
-          const i = idx++;
-          const item = creativeToCheck[i];
-          try {
-            if (item.creativeId && creativeCache[item.creativeId] && creativeCache[item.creativeId].ts && (Date.now() - creativeCache[item.creativeId].ts) < CONFIG.CREATIVE_CACHE_TTL_MS) {
-              const cached = creativeCache[item.creativeId];
-              results[item.creativeId] = results[item.creativeId] || {};
-              if (cached.image) results[item.creativeId].image_url = cached.image;
-              if (cached.oembed) results[item.creativeId].oembed_html = cached.oembed;
-              continue;
-            }
-
-            let imageFound = '';
-            let oembedHtml = '';
-            const tokenParam = token;
-            let permalink = item.permalinkFromBatch || (item.storyId ? Utils.constructPermalink(item.storyId) : '');
-            if (permalink) {
-              try {
-                const oembedUrl = `https://graph.facebook.com/${CONFIG.API_VERSION}/oembed_post?url=${encodeURIComponent(permalink)}&access_token=${encodeURIComponent(tokenParam)}`;
-                const r = await fetch(oembedUrl, { signal });
-                const j = await r.json();
-                if (j && j.thumbnail_url) imageFound = j.thumbnail_url;
-                if (j && j.html) oembedHtml = j.html;
-              } catch (e){ /* ignore */ }
-              if (!imageFound) {
-                const parts = Utils.parseFbPostParts(permalink);
-                if (parts && parts.id) {
-                  try {
-                    const url = new URL(`https://graph.facebook.com/${CONFIG.API_VERSION}/${parts.id}`);
-                    url.searchParams.set('fields', 'full_picture,attachments{media,subattachments,media_type,target},oembed_html');
-                    url.searchParams.set('access_token', tokenParam);
-                    const resp = await fetch(url.toString(), { signal });
-                    const json = await resp.json();
-                    if (!json.error) {
-                      if (json.full_picture) imageFound = json.full_picture;
-                      else if (json.attachments && json.attachments.data && json.attachments.data.length) {
-                        const att = json.attachments.data[0];
-                        if (att.media && att.media.image && att.media.image.src) imageFound = att.media.image.src;
-                        else if (att.subattachments && att.subattachments.data && att.subattachments.data[0] && att.subattachments.data[0].media && att.subattachments.data[0].media.image && att.subattachments.data[0].media.image.src) {
-                          imageFound = att.subattachments.data[0].media.image.src;
-                        }
-                      }
-                      if (json.oembed_html) oembedHtml = json.oembed_html;
-                    }
-                  } catch (e){ /* ignore */ }
-                } else {
-                  try {
-                    const rr = await fetch(permalink, { signal, credentials: 'omit' });
-                    const tx = await rr.text();
-                    const m2 = tx.match(/property=["']og:image["']\s*content=["']([^"']+)["']/i) || tx.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
-                    if (m2 && m2[1]) imageFound = m2[1];
-                    const htmlMatch = tx.match(/<blockquote[\s\S]*?instagram\.com\/p\/[^>]*>[\s\S]*?<\/blockquote>/i);
-                    if (htmlMatch) oembedHtml = htmlMatch[0];
-                  } catch(e){}
-                }
-              }
-            }
-
-            if (imageFound && item.creativeId) {
-              results[item.creativeId] = results[item.creativeId] || {};
-              results[item.creativeId].image_url = imageFound;
-              results[item.creativeId].thumbnail_url = results[item.creativeId].thumbnail_url || imageFound;
-              results[item.creativeId].full_picture = results[item.creativeId].full_picture || imageFound;
-            }
-            if (oembedHtml && item.creativeId) {
-              results[item.creativeId] = results[item.creativeId] || {};
-              results[item.creativeId].oembed_html = oembedHtml;
-            }
-
-            if (item.creativeId && (imageFound || oembedHtml)) {
-              creativeCache[item.creativeId] = { image: imageFound || '', oembed: oembedHtml || '', ts: Date.now() };
-              if (Object.keys(creativeCache).length % 20 === 0) memoryStorage.setItem(cacheKey, JSON.stringify(creativeCache));
-            }
-          } catch (e) {
-            console.warn('worker error', e);
-          }
-        }
-      }
-
-      const workers = [];
-      for (let w=0; w<concurrency; w++) workers.push(worker());
-      await Promise.all(workers);
-
-      // prune expired cache entries and persist
-      const now = Date.now();
-      Object.keys(creativeCache).forEach(k => {
-        if (creativeCache[k].ts && (now - creativeCache[k].ts) > CONFIG.CREATIVE_CACHE_TTL_MS) delete creativeCache[k];
-      });
-      memoryStorage.setItem(cacheKey, JSON.stringify(creativeCache));
-    };
-
-    // DISABLED: Expensive image auto-discovery causes 400 errors and slow loading
-// await tryFillImages();
-return results;
-
+    const fetched = Object.values(results).filter(r => r.permalink).length;
+    console.log(`   ✅ Permalinks fetched: ${fetched} / ${adIds.length}`);
+    return results;
   },
 
   async fetchVideoSource(videoId, token, signal){
@@ -824,50 +669,9 @@ function convertStoryIdToFacebookPost(storyId){
   }
 }
 
-async function fetchCreativeInfoSimple(creativeId, token, signal){
-  if(!creativeId) return { object_story_id: null, image_url: '', thumbnail_url: '', instagram_permalink_url: '' };
-  try{
-    const data = await graphGet(creativeId, { fields: 'object_story_id,image_url,thumbnail_url,instagram_permalink_url,permalink_url,full_picture' }, token, signal);
-    return {
-      object_story_id: data?.object_story_id || null,
-      image_url: data?.image_url || '',
-      thumbnail_url: data?.thumbnail_url || '',
-      instagram_permalink_url: data?.instagram_permalink_url || '',
-      permalink_url: data?.permalink_url || '',
-      full_picture: data?.full_picture || ''
-    };
-  }catch(e){
-    return { object_story_id: null, image_url: '', thumbnail_url: '', instagram_permalink_url: '' };
-  }
-}
+// fetchCreativeInfoSimple — REMOVED (permalink resolution now handled in fetchPermalinksBatch)
 
-async function resolveImageLinkForCreative(creative, token, signal){
-  try{
-    if(!creative) return '';
-    if(creative.object_story_id){
-      const c = convertStoryIdToFacebookPost(creative.object_story_id);
-      if(c) return c;
-    }
-    if(creative.id){
-      const info = await fetchCreativeInfoSimple(creative.id, token, signal);
-      if(info.object_story_id){
-        const p = convertStoryIdToFacebookPost(info.object_story_id);
-        if(p) return p;
-      }
-      if(info.instagram_permalink_url) return info.instagram_permalink_url;
-      if(info.permalink_url) return info.permalink_url;
-      if(info.full_picture) return info.full_picture;
-      if(info.image_url) return info.image_url;
-      if(info.thumbnail_url) return info.thumbnail_url;
-    }
-    if(creative.instagram_permalink_url) return creative.instagram_permalink_url;
-    if(creative.image_url) return creative.image_url;
-    if(creative.thumbnail_url) return creative.thumbnail_url;
-    return '';
-  }catch(e){
-    return '';
-  }
-}
+// resolveImageLinkForCreative — REMOVED (permalink resolution now handled in fetchPermalinksBatch)
 
 /* ---------- Manual mapping helpers ---------- */
 function parseManualPermaps() {
@@ -919,28 +723,17 @@ function extractIgShortcodeFromUrl(url) {
   } catch (e) { return null; }
 }
 
-/* ---------- Choose preferred link ---------- */
+/* ---------- Choose preferred link (Python-style: permalink is already resolved) ---------- */
 function choosePreferredLink(ad) {
-  const candidates = [];
-  if (ad.creative?.instagram_permalink_url) candidates.push({ url: ad.creative.instagram_permalink_url, source: 'creative.instagram' });
-  if (ad.creative?.instagram_url) candidates.push({ url: ad.creative.instagram_url, source: 'creative.instagram_url' });
-  if (ad.creative?.permalink_url) candidates.push({ url: ad.creative.permalink_url, source: 'creative.permalink' });
-  if (ad.permalink) candidates.push({ url: ad.permalink, source: 'ad.permalink' });
-  if (ad.bestLink) candidates.push({ url: ad.bestLink, source: 'ad.bestLink' });
-  if (ad.postUrl) candidates.push({ url: ad.postUrl, source: 'ad.postUrl' });
-
+  // Manual map override
   const mm = State.manualMap || {};
-  if (mm[ad.id]) return { url: mm[ad.id], source: 'manual', platform: /instagram\.com/i.test(mm[ad.id]) ? 'Instagram' : ( /facebook\.com/i.test(mm[ad.id]) ? 'Facebook' : 'Other' ) };
-  if (mm[ad.name]) return { url: mm[ad.name], source: 'manual', platform: /instagram\.com/i.test(mm[ad.name]) ? 'Instagram' : ( /facebook\.com/i.test(mm[ad.name]) ? 'Facebook' : 'Other' ) };
+  if (mm[ad.id]) return { url: mm[ad.id], source: 'manual', platform: /instagram\.com/i.test(mm[ad.id]) ? 'Instagram' : 'Facebook' };
+  if (mm[ad.name]) return { url: mm[ad.name], source: 'manual', platform: /instagram\.com/i.test(mm[ad.name]) ? 'Instagram' : 'Facebook' };
 
-  const ig = candidates.find(c => /instagram\.com/i.test(c.url));
-  if (ig) return { url: ig.url, source: ig.source, platform: 'Instagram' };
-
-  const fb = candidates.find(c => /facebook\.com/i.test(c.url));
-  if (fb) return { url: fb.url, source: fb.source, platform: 'Facebook' };
-
-  if (candidates.length) return { url: candidates[0].url, source: candidates[0].source, platform: /instagram\.com/i.test(candidates[0].url) ? 'Instagram' : 'Other' };
-  return { url: '', source: '', platform: '' };
+  // Use the already-resolved permalink (set during loadAds via Python-style 3-step logic)
+  const url = ad.permalink || ad.bestLink || ad.postUrl || '';
+  const platform = /instagram\.com/i.test(url) ? 'Instagram' : (/facebook\.com/i.test(url) ? 'Facebook' : '');
+  return { url, source: 'resolved', platform };
 }
 
 /* ---------- UI helpers ---------- */
@@ -1266,87 +1059,34 @@ async function loadAds() {
       UI.setStatus(`Fetching permalinks for ${account}...`, 'loading');
       const permalinks = await API.fetchPermalinksBatch(ads, token, accController.signal);
 
-      // process creatives -> aggressive permalink resolve per ad
+      // ── Python-style permalink resolution (clean 3-step) ──
       for (const ad of ads) {
-        const creativeId = ad.creative?.id;
-        const creativeData = (creativeId && permalinks[creativeId]) ? permalinks[creativeId] : {};
-        const storyId = ad.creative?.object_story_id;
-
-        let permalink = '';
-        let platform = 'Facebook';
+        const resolved = permalinks[ad.id] || {};
+        let permalink = resolved.permalink || '';
+        let platform = resolved.platform || 'Facebook';
         let igShortcode = '';
 
-        if (creativeData && creativeData.permalink_url) {
-          permalink = creativeData.permalink_url;
-          if (/instagram\.com/i.test(permalink)) platform = 'Instagram';
-        }
-        if (!permalink && creativeData && (creativeData.instagram_url || creativeData.instagram_permalink_url)) {
-          permalink = creativeData.instagram_url || creativeData.instagram_permalink_url;
-          platform = 'Instagram';
-          const match = permalink.match(/instagram\.com\/p\/([^\/\?]+)/i);
-          if (match) igShortcode = match[1];
-        }
-        if (!permalink && permalinks && storyId && permalinks[storyId]) {
-          permalink = permalinks[storyId];
-          if (/instagram\.com/i.test(permalink)) platform = 'Instagram';
-        }
-        if (!permalink && ad.creative?.object_story_id) {
-          const constructed = Utils.constructPermalink(ad.creative.object_story_id);
-          if (constructed) permalink = constructed;
-        }
-
+        // Manual map override (UI feature)
         const manual = State.manualMap || {};
         if (manual[ad.id]) permalink = manual[ad.id];
         else if (manual[ad.name]) permalink = manual[ad.name];
 
+        // Detect Instagram shortcode from permalink
         if (permalink && /instagram\.com\/p\//i.test(permalink)) {
           platform = 'Instagram';
           const m = permalink.match(/instagram\.com\/p\/([^\/\?#]+)/i);
           if (m) igShortcode = m[1];
         }
 
-        let resolved = '';
-        try {// resolved = await resolveImageLinkForCreative(ad.creative || {}, token, accController.signal); 
-          resolved = null; 
-        } catch(e) { }
-
-        if (!permalink && resolved && /facebook\.com|instagram\.com/i.test(resolved)) {
-          permalink = resolved;
-          if (/instagram\.com/i.test(resolved)) {
-            platform = 'Instagram';
-            const mm = resolved.match(/instagram\.com\/p\/([^\/\?]+)/i);
-            if (mm) igShortcode = mm[1];
-          }
-        }
-
-        if (!permalink) {
-          const possibleImage = (creativeData && (creativeData.image_url || creativeData.full_picture || creativeData.thumbnail_url)) || (ad.creative && (ad.creative.image_url || ad.creative.thumbnail_url)) || '';
-          const shortcode = extractIgShortcodeFromUrl(possibleImage);
-          if (shortcode) {
-            permalink = `https://www.instagram.com/p/${shortcode}/#advertiser`;
-            platform = 'Instagram';
-            igShortcode = shortcode;
-            console.log('Auto constructed IG permalink from image URL for creative', creativeId || '(no id)', shortcode);
-          }
-        }
-
-        if (!permalink && resolved) {
-          creativeData.image_url = creativeData.image_url || resolved;
-          creativeData.thumbnail_url = creativeData.thumbnail_url || resolved;
-          creativeData.full_picture = creativeData.full_picture || resolved;
-        }
-
-        ad.permalink = permalink || '';
+        ad.permalink = permalink;
         ad.platform = platform;
-        ad.igShortcode = igShortcode || '';
+        ad.igShortcode = igShortcode;
 
+        // Carry over image URL from batch results
         ad.creative = ad.creative || {};
-        if (creativeData.image_url) ad.creative.image_url = creativeData.image_url;
-        if (creativeData.thumbnail_url) ad.creative.thumbnail_url = creativeData.thumbnail_url;
-        if (creativeData.full_picture) ad.creative.full_picture = creativeData.full_picture;
-        if (creativeData.video_id) ad.creative.video_id = creativeData.video_id;
-        if (!ad.creative.image_url && creativeId && permalinks[creativeId] && permalinks[creativeId].image_url) {
-          ad.creative.image_url = permalinks[creativeId].image_url;
+        if (resolved.image_url) {
+          ad.creative.image_url = ad.creative.image_url || resolved.image_url;
+          ad.creative.thumbnail_url = ad.creative.thumbnail_url || resolved.image_url;
         }
       }
 
