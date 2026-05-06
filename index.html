@@ -1736,7 +1736,7 @@
             const CONFIG = {
                 API_VERSION: 'v21.0',
                 BATCH_SIZE: 10,
-                INSIGHTS_BATCH_SIZE: 20,
+                INSIGHTS_BATCH_SIZE: 10,
                 STORAGE_KEYS: {
                     TOKEN: 'kenaz_tk',
                     ACCOUNTS: 'kenaz_acc',
@@ -1933,7 +1933,7 @@
                     const results = {};
                     const adIds = ads.filter(ad => ad.id).map(ad => ad.id);
                     if (adIds.length === 0) return results;
-                    const BATCH = 50;
+                    const BATCH = 20;
                     for (let i = 0; i < adIds.length; i += BATCH) {
                         const batch = adIds.slice(i, i + BATCH);
                         const idFilter = JSON.stringify([{ field: 'id', operator: 'IN', value: batch }]);
@@ -1959,6 +1959,7 @@
                                 });
                             }
                         } catch (e) { console.warn(`Permalink batch ${Math.floor(i / BATCH) + 1} failed:`, e); }
+                        if (i + BATCH < adIds.length) await sleep(300);
                     }
                     return results;
                 },
@@ -3147,5 +3148,4 @@
 </body>
 
 </html>
-
 
