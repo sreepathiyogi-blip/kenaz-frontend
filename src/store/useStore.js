@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const getAction = (actions, type) => {
   if (!Array.isArray(actions)) return 0
   return actions.filter(x => x.action_type === type).reduce((s, x) => (+x.value || 0) + s, 0)
@@ -23,7 +22,6 @@ export const extractIgShortcode = (url) => {
   return m?.[1] || null
 }
 
-// Merge raw ad + permalink + insights into one normalized ad object
 export function normalizeAd(raw, permalink = {}, insights = {}) {
   const spend = +insights.spend || 0
   const imp = +insights.impressions || 0
@@ -62,7 +60,6 @@ export function normalizeAd(raw, permalink = {}, insights = {}) {
     imageUrl: permalink.imageUrl || raw.creative?.image_url || raw.creative?.thumbnail_url || '',
     igShortcode: igSc || '',
     isReel: Boolean(igSc) || raw.platform === 'Instagram',
-    // metrics
     spend, rev, roas, imp, reach, clicks, purchases, lpv, atc, ci,
     ctr, cpm, cpc, cpp, v3sec, thruplay, p100,
     hookRate, holdRate, completionRate,
@@ -72,11 +69,10 @@ export function normalizeAd(raw, permalink = {}, insights = {}) {
   }
 }
 
-// ─── Store ────────────────────────────────────────────────────────────────────
 export const useStore = create((set, get) => ({
-  // Config
-  token: localStorage.getItem('kenaz_tk') || '',
-  accounts: localStorage.getItem('kenaz_acc') || '',
+  // Config — reads from localStorage first, then build-time env vars
+  token: localStorage.getItem('kenaz_tk') || import.meta.env.VITE_META_TOKEN || '',
+  accounts: localStorage.getItem('kenaz_acc') || import.meta.env.VITE_META_ACCOUNTS || '',
   dateRange: { since: '', until: '' },
   adStatus: 'ACTIVE',
   manualMap: {},
@@ -87,9 +83,8 @@ export const useStore = create((set, get) => ({
   setAdStatus: (adStatus) => set({ adStatus }),
   setManualMap: (manualMap) => set({ manualMap }),
 
-  // Ads data
   ads: [],
-  insightsMap: {},        // adId → raw insights object
+  insightsMap: {},
   loadingInsights: false,
   insightProgress: { done: 0, total: 0 },
   loadError: null,
@@ -100,7 +95,6 @@ export const useStore = create((set, get) => ({
   setInsightProgress: (p) => set({ insightProgress: p }),
   setLoadError: (e) => set({ loadError: e }),
 
-  // UI state
   activeTab: 'all',
   sortBy: 'spend-desc',
   searchQuery: '',
@@ -113,7 +107,6 @@ export const useStore = create((set, get) => ({
   setSelectedAdId: (selectedAdId) => set({ selectedAdId }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 
-  // Derived: get normalized ads with insights merged
   getNormalizedAds: () => {
     const { ads, insightsMap } = get()
     return ads.map(ad => normalizeAd(ad, ad._permalink || {}, insightsMap[ad.id] || {}))
@@ -122,20 +115,14 @@ export const useStore = create((set, get) => ({
   getFilteredAds: () => {
     const { activeTab, sortBy, searchQuery } = get()
     let list = get().getNormalizedAds()
-
-    // Tab filter
     if (activeTab.startsWith('acc:')) list = list.filter(a => a.account === activeTab.slice(4))
     else if (activeTab.startsWith('prod:')) list = list.filter(a => a.product === activeTab.slice(5))
-
-    // Search
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       list = list.filter(a =>
         [a.name, a.id, a.account, a.product, a.permalink].some(v => String(v || '').toLowerCase().includes(q))
       )
     }
-
-    // Sort
     const [field, dir] = sortBy.split('-')
     list.sort((a, b) => dir === 'desc' ? (b[field] || 0) - (a[field] || 0) : (a[field] || 0) - (b[field] || 0))
     return list
